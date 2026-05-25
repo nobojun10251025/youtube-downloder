@@ -1,5 +1,7 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, send_file
 import yt_dlp
+import os
+import tempfile
 
 app = Flask(__name__)
 
@@ -9,7 +11,6 @@ HTML = """
 <head>
     <title>YouTubeアプリ</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <style>
         body {
             font-family: Arial;
@@ -18,36 +19,27 @@ HTML = """
             text-align: center;
             margin: 0;
         }
-
-        h1 {
-            padding: 10px;
-        }
-
-        form {
-            margin: 10px;
-        }
+        h1 { padding: 10px; }
 
         input {
             width: 80%;
             padding: 10px;
             border-radius: 10px;
             border: none;
-            font-size: 16px;
         }
 
         button {
-            padding: 10px 20px;
+            padding: 10px 15px;
             border-radius: 10px;
             border: none;
             background: red;
             color: white;
-            font-size: 16px;
             margin-top: 10px;
         }
 
         .video {
-            margin: 15px;
             background: #1f1f1f;
+            margin: 10px;
             padding: 10px;
             border-radius: 10px;
         }
@@ -56,15 +48,8 @@ HTML = """
             width: 100%;
             border-radius: 10px;
         }
-
-        iframe {
-            width: 100%;
-            height: 220px;
-            border-radius: 10px;
-        }
     </style>
 </head>
-
 <body>
 
 <h1>YouTube Webアプリ</h1>
@@ -72,12 +57,19 @@ HTML = """
 <form method="POST">
     <input type="text" name="input" placeholder="URL or 検索ワード">
     <br>
-    <button type="submit">実行</button>
+    <button type="submit">検索</button>
 </form>
 
 {% if video_id %}
     <h2>再生中</h2>
-    <iframe src="https://www.youtube.com/embed/{{ video_id }}" allowfullscreen></iframe>
+    <iframe width="100%" height="250"
+        src="https://www.youtube.com/embed/{{ video_id }}"
+        allowfullscreen></iframe>
+
+    <br>
+    <a href="/download?url=https://www.youtube.com/watch?v={{ video_id }}">
+        <button>MP4ダウンロード</button>
+    </a>
 {% endif %}
 
 {% if videos %}
@@ -86,9 +78,15 @@ HTML = """
         <div class="video">
             <p>{{ v.title }}</p>
             <img src="{{ v.thumbnail }}">
+
             <br><br>
+
             <a href="/watch?v={{ v.id }}">
                 <button>再生</button>
+            </a>
+
+            <a href="/download?url=https://www.youtube.com/watch?v={{ v.id }}">
+                <button>MP4ダウンロード</button>
             </a>
         </div>
     {% endfor %}
@@ -104,22 +102,11 @@ PLAYER_HTML = """
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body {
-    background: black;
-    color: white;
-    text-align: center;
-}
-iframe {
-    width: 100%;
-    height: 250px;
-}
-button {
-    padding: 10px;
-    margin-top: 20px;
-}
+body { background: black; color: white; text-align: center; }
+iframe { width: 100%; height: 250px; }
+button { padding: 10px; margin-top: 20px; }
 </style>
 </head>
-
 <body>
 
 <h2>動画再生</h2>
@@ -140,6 +127,7 @@ def get_video_id(text):
         return text.split("youtu.be/")[1]
     return None
 
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     videos = None
@@ -148,11 +136,9 @@ def home():
     if request.method == "POST":
         text = request.form["input"]
 
-        # URLなら再生
         video_id = get_video_id(text)
 
         if not video_id:
-            # 検索
             ydl_opts = {'quiet': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 result = ydl.extract_info(f"ytsearch5:{text}", download=False)
@@ -167,10 +153,34 @@ def home():
 
     return render_template_string(HTML, videos=videos, video_id=video_id)
 
+
 @app.route("/watch")
 def watch():
     vid = request.args.get("v")
     return render_template_string(PLAYER_HTML, video_id=vid)
+
+
+@app.route("/download")
+def download():
+    url = request.args.get("url")
+
+    tmp_dir = tempfile.mkdtemp()
+
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4',
+        'outtmpl': os.path.join(tmp_dir, '%(title)s.%(ext)s'),
+        'quiet': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+        file_path = ydl.prepare_filename(info)
+        file_path = os.path.splitext(file_path)[0] + ".mp4"
+
+    return send_file(file_path, as_attachment=True)
+
 
 if __name__ == "__main__":
     import os
